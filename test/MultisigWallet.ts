@@ -1,7 +1,6 @@
 import { ethers } from "hardhat";
-import { Signer } from "ethers";
 import { assert, expect } from "chai";
-import { MultisigWallet, MultisigWallet__factory } from "../typechain-types";
+import { MultisigWallet__factory } from "../typechain-types";
 import "@nomicfoundation/hardhat-chai-matchers";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 
