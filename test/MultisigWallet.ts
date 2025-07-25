@@ -1,16 +1,14 @@
 import { ethers } from "hardhat";
 import { assert, expect } from "chai";
-import { MultisigWallet__factory } from "../typechain-types";
+import { MultisigWallet__factory, MyToken__factory } from "../typechain-types";
 import "@nomicfoundation/hardhat-chai-matchers";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 
 describe("MultisigWallet Test", function () {
   async function deployMultisigFixture() {
-    // Get multiple signers for our tests
     const [account0, account1, account2, account3, account4, nonOwner] =
       await ethers.getSigners();
 
-    // Create an array of owner addresses for the constructor
     const owners = [
       await account0.getAddress(),
       await account1.getAddress(),
@@ -19,6 +17,9 @@ describe("MultisigWallet Test", function () {
       await account4.getAddress(),
     ];
     const requiredConfirmations = 3;
+    const name = "Serene";
+    const symbol = "SER";
+    const initialSupply = 1000;
 
     const MultisigFactory = (await ethers.getContractFactory(
       "MultisigWallet"
@@ -28,7 +29,11 @@ describe("MultisigWallet Test", function () {
       requiredConfirmations
     );
 
-    // Return everything we need for our tests
+    const MyTokenFactory = (await ethers.getContractFactory(
+      "MyToken"
+    )) as MyToken__factory;
+    const myToken = await MyTokenFactory.deploy(name, symbol, initialSupply);
+
     return {
       multisigWallet,
       MultisigFactory,
@@ -38,6 +43,7 @@ describe("MultisigWallet Test", function () {
       account1,
       account2,
       nonOwner,
+      myToken,
     };
   }
 
@@ -221,5 +227,43 @@ describe("MultisigWallet Test", function () {
     await expect(
       multisigWallet.connect(account0).executeTransaction(txIndex)
     ).to.be.revertedWith("The transaction is already executed");
+  });
+
+  it("Mock token deployed", async function(){
+    const {myToken} = await loadFixture(deployMultisigFixture);
+    const deployedAmount = ethers.parseUnits("1000", 18);
+    assert.isOk(await myToken.getAddress());
+    assert.equal(await myToken.name(), "Serene");
+    assert.equal(await myToken.symbol(), "SER");
+    assert.equal(await myToken.totalSupply(), deployedAmount);
+  });
+
+  it("Fund the multisig wallet", async function(){
+    const {myToken, multisigWallet, account0} = await loadFixture(deployMultisigFixture);
+    const amount = ethers.parseUnits("50", 18);
+    await myToken.connect(account0).transfer(multisigWallet.getAddress(), amount);
+    assert.equal(await myToken.balanceOf(multisigWallet.getAddress()), amount);
+  });
+
+  it("End-to-end test", async function(){
+    const {myToken, multisigWallet, account0, account1, account2, nonOwner} = await loadFixture(deployMultisigFixture);
+    const amount = ethers.parseUnits("100", 18);
+    await myToken.connect(account0).transfer(multisigWallet.getAddress(), amount);
+    const to = myToken.getAddress();
+    const value = 0;
+    const iERC20 = new ethers.Interface(["function transfer(address to, uint256 amount)"]);
+    const data = iERC20.encodeFunctionData("transfer", [account2.address, amount]);
+    const txIndex = 0;
+    await multisigWallet.connect(account0).submitTransaction(to, value, data);
+
+    await multisigWallet.connect(account0).confirmTransaction(txIndex);
+    await multisigWallet.connect(account1).confirmTransaction(txIndex);
+    await multisigWallet.connect(account2).confirmTransaction(txIndex);
+
+    await expect(multisigWallet.connect(nonOwner).executeTransaction(txIndex))
+    .to.be.revertedWith("Only owner can call this function");
+    await multisigWallet.connect(account0).executeTransaction(txIndex);
+    assert.equal(await myToken.balanceOf(account2.address), amount);
+    assert.equal(await myToken.balanceOf(multisigWallet.getAddress()), 0n);
   });
 });
